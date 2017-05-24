@@ -1,3 +1,6 @@
+This is a fork of wxMathPlot. The main purpose of the fork was improvement of the GUI user experience by adding intuitive ways of interaction with graphs.
+Graphs can be manipulated (zoomed, panned) in a similar way to map navigation in applications like Google Maps.
+
 wxMathPlot is a framework for mathematical graph plotting in wxWindows.
 
 For more information go to

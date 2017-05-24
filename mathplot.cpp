@@ -68,9 +68,6 @@
 // Number of pixels to scroll when scrolling by a line
 #define mpSCROLL_NUM_PIXELS_PER_LINE  10
 
-// See doxygen comments.
-double mpWindow::zoomIncrementalFactor = 1.5;
-
 //-----------------------------------------------------------------------------
 // mpLayer
 //-----------------------------------------------------------------------------
@@ -726,6 +723,7 @@ mpScaleX::mpScaleX(wxString name, int flags, bool ticks, unsigned int type)
     m_labelType = type;
     m_type = mpLAYER_AXIS;
 	m_labelFormat = wxT("");
+	m_step = -1.0;
 }
 
 void mpScaleX::Plot(wxDC & dc, mpWindow & w)
@@ -764,7 +762,7 @@ void mpScaleX::Plot(wxDC & dc, mpWindow & w)
             dc.DrawLine( w.GetMarginLeft(), orgy, w.GetScrX() - w.GetMarginRight(), orgy); */
 
 		const double dig  = floor( log( 128.0 / w.GetScaleX() ) / mpLN10 );
-		const double step = exp( mpLN10 * dig);
+		const double step = m_step > 0.0 ? m_step : exp( mpLN10 * dig);
 		const double end  = w.GetPosX() + (double)extend / w.GetScaleX();
 
 		wxCoord tx, ty;
@@ -859,6 +857,8 @@ void mpScaleX::Plot(wxDC & dc, mpWindow & w)
 						s.Printf(fmt, sign*hh, mm, floor(ss));
 					else
 						s.Printf(fmt, sign*mm, ss);
+				} else if (m_labelType == mpX_NONE) {
+					//
 				}
 				dc.GetTextExtent(s, &tx, &ty);
 				labelH = (labelH <= ty) ? ty : labelH;
@@ -967,6 +967,7 @@ mpScaleY::mpScaleY(wxString name, int flags, bool ticks)
     m_ticks = ticks;
     m_type = mpLAYER_AXIS;
 	m_labelFormat = wxT("");
+	m_step = -1.0;
 }
 
 void mpScaleY::Plot(wxDC & dc, mpWindow & w)
@@ -1007,7 +1008,7 @@ void mpScaleY::Plot(wxDC & dc, mpWindow & w)
 		    dc.DrawLine( orgx, w.GetMarginTop(), orgx, w.GetScrY() - w.GetMarginBottom()); */
 
 		const double dig  = floor( log( 128.0 / w.GetScaleY() ) / mpLN10 );
-		const double step = exp( mpLN10 * dig);
+		const double step = m_step > 0.0 ? m_step : exp( mpLN10 * dig);
 		const double end  = w.GetPosY() + (double)extend / w.GetScaleY();
 
 		wxCoord tx, ty;
@@ -1072,19 +1073,23 @@ void mpScaleY::Plot(wxDC & dc, mpWindow & w)
 				m_pen.SetStyle(wxSOLID);
 				dc.SetPen( m_pen);
 			}
-			// Print ticks labels
-			s.Printf(fmt, n);
-			dc.GetTextExtent(s, &tx, &ty);
+			
+			if (false == m_labelFormat.empty())
+			{
+				// Print ticks labels
+				s.Printf(fmt, n);
+				dc.GetTextExtent(s, &tx, &ty);
 #ifdef MATHPLOT_DO_LOGGING
-			if (ty != labelHeigth) wxLogMessage(wxT("mpScaleY::Plot: ty(%f) and labelHeigth(%f) differ!"), ty, labelHeigth);
+				if (ty != labelHeigth) wxLogMessage(wxT("mpScaleY::Plot: ty(%f) and labelHeigth(%f) differ!"), ty, labelHeigth);
 #endif
-			labelW = (labelW <= tx) ? tx : labelW;
-			if ((tmp-p+labelHeigth/2) > mpMIN_Y_AXIS_LABEL_SEPARATION) {
-				if ((m_flags == mpALIGN_BORDER_LEFT) || (m_flags == mpALIGN_RIGHT))
-					dc.DrawText( s, orgx+4, p-ty/2);
-				else
-					dc.DrawText( s, orgx-4-tx, p-ty/2); //( s, orgx+4, p-ty/2);
-				tmp=p-labelHeigth/2;
+				labelW = (labelW <= tx) ? tx : labelW;
+				if ((tmp-p+labelHeigth/2) > mpMIN_Y_AXIS_LABEL_SEPARATION) {
+					if ((m_flags == mpALIGN_BORDER_LEFT) || (m_flags == mpALIGN_RIGHT))
+						dc.DrawText( s, orgx+4, p-ty/2);
+					else
+						dc.DrawText( s, orgx-4-tx, p-ty/2); //( s, orgx+4, p-ty/2);
+					tmp=p-labelHeigth/2;
+				}
 			}
 		}
 		}
@@ -1157,17 +1162,22 @@ BEGIN_EVENT_TABLE(mpWindow, wxWindow)
     EVT_MOTION( mpWindow::OnMouseMove )   // JLB
     EVT_LEFT_DOWN( mpWindow::OnMouseLeftDown)
     EVT_LEFT_UP( mpWindow::OnMouseLeftRelease)
+	EVT_ENTER_WINDOW( mpWindow::OnMouseEnterWindow)
 
     EVT_MENU( mpID_CENTER,    mpWindow::OnCenter)
     EVT_MENU( mpID_FIT,       mpWindow::OnFit)
     EVT_MENU( mpID_ZOOM_IN,   mpWindow::OnZoomIn)
     EVT_MENU( mpID_ZOOM_OUT,  mpWindow::OnZoomOut)
+	EVT_MENU( mpID_ZOOM_ALLOW_X,   mpWindow::OnZoomAllowX)
+    EVT_MENU( mpID_ZOOM_ALLOW_Y,  mpWindow::OnZoomAllowY)
+	EVT_MENU( mpID_ZOOM_ALLOW_BOTH,   mpWindow::OnZoomAllowBoth)
+	EVT_MENU( mpID_USE_DEFAULT_VIEW,   mpWindow::OnUseDefaultView)
     EVT_MENU( mpID_LOCKASPECT,mpWindow::OnLockAspect)
     EVT_MENU( mpID_HELP_MOUSE,mpWindow::OnMouseHelp)
 END_EVENT_TABLE()
 
-mpWindow::mpWindow( wxWindow *parent, wxWindowID id, const wxPoint &pos, const wxSize &size, long flag )
-    : wxWindow( parent, id, pos, size, flag, wxT("mathplot") )
+mpWindow::mpWindow( wxWindow *parent, wxWindowID id, const wxPoint &pos, const wxSize &size, long flag, const wxString& strName )
+    : wxWindow( parent, id, pos, size, flag, strName )
 {
     m_scaleX = m_scaleY = 1.0;
     m_posX   = m_posY   = 0;
@@ -1180,12 +1190,17 @@ mpWindow::mpWindow( wxWindow *parent, wxWindowID id, const wxPoint &pos, const w
     m_buff_bmp = NULL;
     m_enableDoubleBuffer        = FALSE;
     m_enableMouseNavigation     = TRUE;
+	m_enableKeyboardNavigation  = TRUE;
+	m_enablePopupMenu			= TRUE;
     m_mouseMovedAfterRightClick = FALSE;
+	m_autoFocus					= FALSE;
     m_movingInfoLayer = NULL;
     // Set margins to 0
     m_marginTop = 0; m_marginRight = 0; m_marginBottom = 0; m_marginLeft = 0;
 
+	m_defaultXmin = -1.0; m_defaultXmax = 1.0; m_defaultYmin = -1.0; m_defaultYmax = 1.0;
 
+	m_zoom = ZOOM_BOTH;
     m_lockaspect = FALSE;
 
     m_popmenu.Append( mpID_CENTER,     _("Center"),      _("Center plot view to this position"));
@@ -1202,6 +1217,8 @@ mpWindow::mpWindow( wxWindow *parent, wxWindowID id, const wxPoint &pos, const w
 
     m_enableScrollBars = false;
     SetSizeHints(128, 128);
+
+	m_zoomIncrementalFactor = 1.5;
 
     // J.L.Blanco: Eliminates the "flick" with the double buffer.
     SetBackgroundStyle( wxBG_STYLE_CUSTOM );
@@ -1221,6 +1238,54 @@ mpWindow::~mpWindow()
     }
 }
 
+void mpWindow::SetPopupMenuItems(const std::vector<mpMenuItem>& items)
+{
+	// Delete current items
+	while (m_popmenu.GetMenuItemCount() > 0)
+	{
+		auto& current = m_popmenu.GetMenuItems();
+		m_popmenu.Destroy(current.front());
+	}
+
+	// Add new items
+	for (auto it = items.begin(); it != items.end(); ++it)
+	{
+		switch (*it)
+		{
+		case mpZOOM_SETTINGS:
+			m_popmenu.AppendRadioItem(mpID_ZOOM_ALLOW_X, _("Zoom only X"), _("Restrict zoom to X axis"));
+			m_popmenu.AppendRadioItem(mpID_ZOOM_ALLOW_Y, _("Zoom only Y"), _("Restrict zoom to Y axis"));
+			m_popmenu.AppendRadioItem(mpID_ZOOM_ALLOW_BOTH, _("Zoom X and Y"), _("Zoom X and Y simultaneously"));
+			m_popmenu.Check(mpID_ZOOM_ALLOW_BOTH, true);
+			break;
+		case mpZOOM_FUNCTIONS:
+			m_popmenu.Append(mpID_ZOOM_IN, _("Zoom in"), _("Zoom in plot view."));
+			m_popmenu.Append(mpID_ZOOM_OUT, _("Zoom out"), _("Zoom out plot view."));
+			break;
+		case mpCENTER_VIEW:
+			m_popmenu.Append(mpID_CENTER, _("Center"), _("Center plot view to this position"));
+			break;
+		case mpDEFAULT_VIEW:
+			m_popmenu.Append(mpID_USE_DEFAULT_VIEW, _("Reset"), _("Show default view"));
+			break;
+		case mpFIT_VIEW:
+			m_popmenu.Append(mpID_FIT, _("Fit"), _("Set plot view to show all items"));   
+			break;
+		case mpLOCK_ASPECT:
+			m_popmenu.AppendCheckItem(mpID_LOCKASPECT, _("Lock aspect"), _("Lock horizontal and vertical zoom aspect."));
+			break;
+		case mpHELP_MOUSE:
+			m_popmenu.Append(mpID_HELP_MOUSE, _("Show mouse commands..."), _("Show help about the mouse commands."));
+			break;
+		case mpSEPARATOR:
+			m_popmenu.AppendSeparator();
+			break;
+		default:
+			break;
+		}
+	}
+}
+
 // Mouse handler, for detecting when the user drag with the right button or just "clicks" for the menu
 // JLB
 void mpWindow::OnMouseRightDown(wxMouseEvent     &event)
@@ -1228,10 +1293,18 @@ void mpWindow::OnMouseRightDown(wxMouseEvent     &event)
     m_mouseMovedAfterRightClick = FALSE;
     m_mouseRClick_X = event.GetX();
     m_mouseRClick_Y = event.GetY();
-    if (m_enableMouseNavigation)
+    if (m_enableMouseNavigation && m_enableKeyboardNavigation)
     {
         SetCursor( *wxCROSS_CURSOR );
     }
+}
+
+void mpWindow::OnMouseEnterWindow(wxMouseEvent &event)
+{
+	if (m_autoFocus)
+	{
+		SetFocus();
+	}
 }
 
 // Process mouse wheel events
@@ -1246,36 +1319,74 @@ void mpWindow::OnMouseWheel( wxMouseEvent &event )
 
 //     GetClientSize( &m_scrX,&m_scrY);
 
-    if (event.m_controlDown)
-    {
-	wxPoint clickPt( event.GetX(),event.GetY() );
-        // CTRL key hold: Zoom in/out:
-        if (event.GetWheelRotation()>0)
-                ZoomIn( clickPt );
-        else    ZoomOut( clickPt );
-    }
-    else
-    {
-        // Scroll vertically or horizontally (this is SHIFT is hold down).
-        int change = - event.GetWheelRotation(); // Opposite direction (More intuitive)!
-        double changeUnitsX = change / m_scaleX;
-        double changeUnitsY = change / m_scaleY;
-
-        if (event.m_shiftDown)
+	if (m_enableKeyboardNavigation)
 	{
-                m_posX 		+= changeUnitsX;
-		m_desiredXmax 	+= changeUnitsX;
-		m_desiredXmin 	+= changeUnitsX;
-	}
-        else    
-	{
-		m_posY 		-= changeUnitsY;
-		m_desiredYmax	-= changeUnitsY;
-		m_desiredYmax	-= changeUnitsY;
-	}
+		if (event.m_controlDown)
+		{
+			wxPoint clickPt( event.GetX(),event.GetY() );
+			// CTRL key hold: Zoom in/out:
+			if (event.GetWheelRotation()>0)
+					ZoomIn( clickPt );
+			else    ZoomOut( clickPt );
+		}
+		else
+		{
+			// Scroll vertically or horizontally (this is SHIFT is hold down).
+			int change = - event.GetWheelRotation(); // Opposite direction (More intuitive)!
+			double changeUnitsX = change / m_scaleX;
+			double changeUnitsY = change / m_scaleY;
 
-        UpdateAll();
-    }
+			if (event.m_shiftDown)
+			{
+						m_posX 		+= changeUnitsX;
+				m_desiredXmax 	+= changeUnitsX;
+				m_desiredXmin 	+= changeUnitsX;
+			}
+			else    
+			{
+				m_posY 		-= changeUnitsY;
+				m_desiredYmax	-= changeUnitsY;
+				m_desiredYmax	-= changeUnitsY;
+			}
+
+			UpdateAll();
+		}
+	}
+	else
+	{
+		wxPoint clickPt( event.GetX(),event.GetY() );
+
+		if (event.GetWheelRotation()>0)
+		{
+			switch (m_zoom)
+			{
+			case ZOOM_BOTH:
+				ZoomIn(clickPt);
+				break;
+			case ZOOM_X:
+				ZoomInX(clickPt);
+				break;
+			case ZOOM_Y:
+				ZoomInY(clickPt);
+				break;
+			}
+		}
+		else
+		{
+			switch (m_zoom)
+			{
+			case ZOOM_BOTH:
+				ZoomOut(clickPt);
+				break;
+			case ZOOM_X:
+				ZoomOutX(clickPt);
+				break;
+			case ZOOM_Y:
+				ZoomOutY(clickPt);
+				break;
+			}
+		}
+	}
 }
 
 // If the user "drags" with the right buttom pressed, do "pan"
@@ -1290,44 +1401,82 @@ void mpWindow::OnMouseMove(wxMouseEvent     &event)
 
     if (event.m_rightDown)
     {
-        m_mouseMovedAfterRightClick = TRUE;  // Hides the popup menu after releasing the button!
+		if (m_enableKeyboardNavigation)
+		{
+			m_mouseMovedAfterRightClick = TRUE;  // Hides the popup menu after releasing the button!
 
-        // The change:
-        int  Ax= m_mouseRClick_X - event.GetX();
-        int  Ay= m_mouseRClick_Y - event.GetY();
+			// The change:
+			int  Ax= m_mouseRClick_X - event.GetX();
+			int  Ay= m_mouseRClick_Y - event.GetY();
 
-        // For the next event, use relative to this coordinates.
-        m_mouseRClick_X = event.GetX();
-        m_mouseRClick_Y = event.GetY();
+			// For the next event, use relative to this coordinates.
+			m_mouseRClick_X = event.GetX();
+			m_mouseRClick_Y = event.GetY();
 
-        double   Ax_units = Ax / m_scaleX;
-        double   Ay_units = -Ay / m_scaleY;
+			double   Ax_units = Ax / m_scaleX;
+			double   Ay_units = -Ay / m_scaleY;
 
-        m_posX += Ax_units;
-        m_posY += Ay_units;
-	m_desiredXmax 	+= Ax_units;
-	m_desiredXmin 	+= Ax_units;
-	m_desiredYmax 	+= Ay_units;
-	m_desiredYmin 	+= Ay_units;
+			m_posX += Ax_units;
+			m_posY += Ay_units;
+			m_desiredXmax 	+= Ax_units;
+			m_desiredXmin 	+= Ax_units;
+			m_desiredYmax 	+= Ay_units;
+			m_desiredYmin 	+= Ay_units;
 
-        UpdateAll();
+			UpdateAll();
 
 #ifdef MATHPLOT_DO_LOGGING
-        wxLogMessage(_("[mpWindow::OnMouseMove] Ax:%i Ay:%i m_posX:%f m_posY:%f"),Ax,Ay,m_posX,m_posY);
+			wxLogMessage(_("[mpWindow::OnMouseMove] Ax:%i Ay:%i m_posX:%f m_posY:%f"),Ax,Ay,m_posX,m_posY);
 #endif
-    } else {
-        if (event.m_leftDown) {
-            if (m_movingInfoLayer == NULL) {
-                wxClientDC dc(this);
-                wxPen pen(*wxBLACK, 1, wxDOT);
-                dc.SetPen(pen);
-                dc.SetBrush(*wxTRANSPARENT_BRUSH);
-                dc.DrawRectangle(m_mouseLClick_X, m_mouseLClick_Y, event.GetX() - m_mouseLClick_X, event.GetY() - m_mouseLClick_Y);
-            } else {
-                wxPoint moveVector(event.GetX() - m_mouseLClick_X, event.GetY() - m_mouseLClick_Y);
-                m_movingInfoLayer->Move(moveVector);
-            }
-            UpdateAll();
+		}
+    } 
+	else 
+	{
+        if (event.m_leftDown) 
+		{
+			if (m_enableKeyboardNavigation)
+			{
+				if (m_movingInfoLayer == NULL) {
+					wxClientDC dc(this);
+					wxPen pen(*wxBLACK, 1, wxDOT);
+					dc.SetPen(pen);
+					dc.SetBrush(*wxTRANSPARENT_BRUSH);
+					dc.DrawRectangle(m_mouseLClick_X, m_mouseLClick_Y, event.GetX() - m_mouseLClick_X, event.GetY() - m_mouseLClick_Y);
+				} else {
+					wxPoint moveVector(event.GetX() - m_mouseLClick_X, event.GetY() - m_mouseLClick_Y);
+					m_movingInfoLayer->Move(moveVector);
+				}
+				UpdateAll();
+			}
+			else
+			{
+				m_mouseMovedAfterRightClick = TRUE;  // Hides the popup menu after releasing the button!
+
+				// The change:
+				int  Ax= m_mouseRClick_X - event.GetX();
+				int  Ay= m_mouseRClick_Y - event.GetY();
+
+				// For the next event, use relative to this coordinates.
+				m_mouseRClick_X = event.GetX();
+				m_mouseRClick_Y = event.GetY();
+
+				double   Ax_units = Ax / m_scaleX;
+				double   Ay_units = -Ay / m_scaleY;
+
+				m_posX += Ax_units;
+				m_posY += Ay_units;
+				m_desiredXmax 	+= Ax_units;
+				m_desiredXmin 	+= Ax_units;
+				m_desiredYmax 	+= Ay_units;
+				m_desiredYmin 	+= Ay_units;
+
+				UpdateAll();
+
+#ifdef MATHPLOT_DO_LOGGING
+				wxLogMessage(_("[mpWindow::OnMouseMove] Ax:%i Ay:%i m_posX:%f m_posY:%f"),Ax,Ay,m_posX,m_posY);
+#endif
+			}
+
         } else {
             wxLayerList::iterator li;
             for (li = m_layers.begin(); li != m_layers.end(); li++) {
@@ -1353,39 +1502,52 @@ void mpWindow::OnMouseMove(wxMouseEvent     &event)
 
 void mpWindow::OnMouseLeftDown (wxMouseEvent &event)
 {
-    m_mouseLClick_X = event.GetX();
-    m_mouseLClick_Y = event.GetY();
+	if (m_enableKeyboardNavigation)
+	{
+		m_mouseLClick_X = event.GetX();
+		m_mouseLClick_Y = event.GetY();
 #ifdef MATHPLOT_DO_LOGGING
-    wxLogMessage(_("mpWindow::OnMouseLeftDown() X = %d , Y = %d"), event.GetX(), event.GetY());/*m_mouseLClick_X, m_mouseLClick_Y);*/
+		wxLogMessage(_("mpWindow::OnMouseLeftDown() X = %d , Y = %d"), event.GetX(), event.GetY());/*m_mouseLClick_X, m_mouseLClick_Y);*/
 #endif
-    wxPoint pointClicked = event.GetPosition(); 
-    m_movingInfoLayer = IsInsideInfoLayer(pointClicked);
-    if (m_movingInfoLayer != NULL) {
+		wxPoint pointClicked = event.GetPosition(); 
+		m_movingInfoLayer = IsInsideInfoLayer(pointClicked);
+		if (m_movingInfoLayer != NULL) {
 #ifdef MATHPLOT_DO_LOGGING
-        wxLogMessage(_("mpWindow::OnMouseLeftDown() started moving layer %lx"), (long int) m_movingInfoLayer);/*m_mouseLClick_X, m_mouseLClick_Y);*/
+			wxLogMessage(_("mpWindow::OnMouseLeftDown() started moving layer %lx"), (long int) m_movingInfoLayer);/*m_mouseLClick_X, m_mouseLClick_Y);*/
 #endif
-    }
+		}
+	}
+	else
+	{
+		m_mouseMovedAfterRightClick = FALSE;
+	    m_mouseRClick_X = event.GetX();
+	    m_mouseRClick_Y = event.GetY();
+	}
     event.Skip();
 }
 
 void mpWindow::OnMouseLeftRelease (wxMouseEvent &event)
 {
-    wxPoint release(event.GetX(), event.GetY());
-    wxPoint press(m_mouseLClick_X, m_mouseLClick_Y);
-    if (m_movingInfoLayer != NULL) {
-        m_movingInfoLayer->UpdateReference();
-        m_movingInfoLayer = NULL;
-    } else {
-        if (release != press) {
-            ZoomRect(press, release);
-        } /*else {
-            if (m_coordTooltip) {
-                wxString toolTipContent;
-                toolTipContent.Printf(_("X = %f\nY = %f"), p2x(event.GetX()), p2y(event.GetY()));
-                SetToolTip(toolTipContent);
-            }
-        } */
-    }
+	// Only display menu if the user has not "dragged" the figure
+    if (m_enableKeyboardNavigation)
+    {
+		wxPoint release(event.GetX(), event.GetY());
+		wxPoint press(m_mouseLClick_X, m_mouseLClick_Y);
+		if (m_movingInfoLayer != NULL) {
+			m_movingInfoLayer->UpdateReference();
+			m_movingInfoLayer = NULL;
+		} else {
+			if (release != press) {
+				ZoomRect(press, release);
+			} /*else {
+				if (m_coordTooltip) {
+					wxString toolTipContent;
+					toolTipContent.Printf(_("X = %f\nY = %f"), p2x(event.GetX()), p2y(event.GetY()));
+					SetToolTip(toolTipContent);
+				}
+			} */
+		}
+	}
     event.Skip();
 }
 
@@ -1459,7 +1621,7 @@ void mpWindow::DoZoomInXCalc (const int staticXpixel)
 	// Preserve the position of the clicked point:
 	double staticX = p2x( staticXpixel );
 	// Zoom in:
-	m_scaleX = m_scaleX * zoomIncrementalFactor;
+	m_scaleX = m_scaleX * m_zoomIncrementalFactor;
 	// Adjust the new m_posx
 	m_posX = staticX - (staticXpixel / m_scaleX);
     // Adjust desired
@@ -1475,7 +1637,7 @@ void mpWindow::DoZoomInYCalc (const int staticYpixel)
 	// Preserve the position of the clicked point:
 	double staticY = p2y( staticYpixel );
 	// Zoom in:
-	m_scaleY = m_scaleY * zoomIncrementalFactor;
+	m_scaleY = m_scaleY * m_zoomIncrementalFactor;
 	// Adjust the new m_posy:
 	m_posY = staticY + (staticYpixel / m_scaleY);
     // Adjust desired
@@ -1491,7 +1653,7 @@ void mpWindow::DoZoomOutXCalc  (const int staticXpixel)
 	// Preserve the position of the clicked point:
 	double staticX = p2x( staticXpixel );
 	// Zoom out:
-	m_scaleX = m_scaleX / zoomIncrementalFactor;
+	m_scaleX = m_scaleX / m_zoomIncrementalFactor;
 	// Adjust the new m_posx/y:
 	m_posX = staticX - (staticXpixel / m_scaleX);
     // Adjust desired
@@ -1507,7 +1669,7 @@ void mpWindow::DoZoomOutYCalc  (const int staticYpixel)
 	// Preserve the position of the clicked point:
 	double staticY = p2y( staticYpixel );
 	// Zoom out:
-	m_scaleY = m_scaleY / zoomIncrementalFactor;
+	m_scaleY = m_scaleY / m_zoomIncrementalFactor;
 	// Adjust the new m_posx/y:
 	m_posY = staticY + (staticYpixel / m_scaleY);
     // Adjust desired
@@ -1534,8 +1696,8 @@ void mpWindow::ZoomIn(const wxPoint& centerPoint )
 	double prior_layer_y = p2y( c.y );
 
 	// Zoom in:
-	m_scaleX = m_scaleX * zoomIncrementalFactor;
-	m_scaleY = m_scaleY * zoomIncrementalFactor;
+	m_scaleX = m_scaleX * m_zoomIncrementalFactor;
+	m_scaleY = m_scaleY * m_zoomIncrementalFactor;
 
 	// Adjust the new m_posx/y:
 	m_posX = prior_layer_x - c.x / m_scaleX;
@@ -1569,8 +1731,8 @@ void mpWindow::ZoomOut(const wxPoint& centerPoint )
 	double prior_layer_y = p2y( c.y );
 
 	// Zoom out:
-	m_scaleX = m_scaleX / zoomIncrementalFactor;
-	m_scaleY = m_scaleY / zoomIncrementalFactor;
+	m_scaleX = m_scaleX / m_zoomIncrementalFactor;
+	m_scaleY = m_scaleY / m_zoomIncrementalFactor;
 
 	// Adjust the new m_posx/y:
 	m_posX = prior_layer_x - c.x / m_scaleX;
@@ -1587,28 +1749,100 @@ void mpWindow::ZoomOut(const wxPoint& centerPoint )
     UpdateAll();
 }
 
-void mpWindow::ZoomInX()
+void mpWindow::ZoomInX(const wxPoint& centerPoint)
 {
-    m_scaleX = m_scaleX * zoomIncrementalFactor;
+	wxPoint	c(centerPoint);	
+	if (c == wxDefaultPosition)
+	{
+		GetClientSize(&m_scrX, &m_scrY);
+		c.x = (m_scrX - m_marginLeft - m_marginRight)/2 + m_marginLeft; // c.x = m_scrX/2;
+	}
+
+	// Preserve the position of the clicked point:
+	double prior_layer_x = p2x( c.x );
+
+	// Zoom in:
+	m_scaleX = m_scaleX * m_zoomIncrementalFactor;
+
+	// Adjust the new m_posx/y:
+	m_posX = prior_layer_x - c.x / m_scaleX;
+
+	m_desiredXmin = m_posX;
+	m_desiredXmax = m_posX + (m_scrX - m_marginLeft - m_marginRight) / m_scaleX; // m_desiredXmax = m_posX + m_scrX / m_scaleX;
+
     UpdateAll();
 }
 
-void mpWindow::ZoomOutX()
+void mpWindow::ZoomOutX(const wxPoint& centerPoint)
 {
-    m_scaleX = m_scaleX / zoomIncrementalFactor;
+    wxPoint	c(centerPoint);	
+	if (c == wxDefaultPosition)
+	{
+		GetClientSize(&m_scrX, &m_scrY);
+		c.x = (m_scrX - m_marginLeft - m_marginRight)/2 + m_marginLeft; // c.x = m_scrX/2;
+	}
+
+	// Preserve the position of the clicked point:
+	double prior_layer_x = p2x( c.x );
+
+	// Zoom out:
+	m_scaleX = m_scaleX / m_zoomIncrementalFactor;
+
+	// Adjust the new m_posx/y:
+	m_posX = prior_layer_x - c.x / m_scaleX;
+
+	m_desiredXmin = m_posX;
+	m_desiredXmax = m_posX + (m_scrX - m_marginLeft - m_marginRight) / m_scaleX; // m_desiredXmax = m_posX + m_scrX / m_scaleX;
+
     UpdateAll();
 }
 
-void mpWindow::ZoomInY()
+void mpWindow::ZoomInY(const wxPoint& centerPoint)
 {
-    m_scaleY = m_scaleY * zoomIncrementalFactor;
+    wxPoint	c(centerPoint);	
+	if (c == wxDefaultPosition)
+	{
+		GetClientSize(&m_scrX, &m_scrY);
+		c.y = (m_scrY - m_marginTop - m_marginBottom)/2 - m_marginTop; // c.y = m_scrY/2;
+	}
+
+	// Preserve the position of the clicked point:
+	double prior_layer_y = p2y( c.y );
+
+	// Zoom in:
+	m_scaleY = m_scaleY * m_zoomIncrementalFactor;
+
+	// Adjust the new m_posx/y:
+	m_posY = prior_layer_y + c.y / m_scaleY;
+
+	m_desiredYmax = m_posY;
+	m_desiredYmin = m_posY - (m_scrY - m_marginTop - m_marginBottom) / m_scaleY; // m_desiredYmin = m_posY - m_scrY / m_scaleY;
+
     UpdateAll();
 }
 
-void mpWindow::ZoomOutY()
+void mpWindow::ZoomOutY(const wxPoint& centerPoint)
 {
-    m_scaleY = m_scaleY / zoomIncrementalFactor;
-    UpdateAll();
+    wxPoint	c(centerPoint);	
+	if (c == wxDefaultPosition)
+	{
+		GetClientSize(&m_scrX, &m_scrY);
+		c.y = (m_scrY - m_marginTop - m_marginBottom)/2 - m_marginTop; // c.y = m_scrY/2;
+	}
+
+	// Preserve the position of the clicked point:
+	double prior_layer_y = p2y( c.y );
+
+	// Zoom out:
+	m_scaleY = m_scaleY / m_zoomIncrementalFactor;
+
+	// Adjust the new m_posx/y:
+	m_posY = prior_layer_y + c.y / m_scaleY;
+
+	m_desiredYmax = m_posY;
+	m_desiredYmin = m_posY - (m_scrY - m_marginTop - m_marginBottom) / m_scaleY; // m_desiredYmin = m_posY - m_scrY / m_scaleY;
+
+	 UpdateAll();
 }
 
 void mpWindow::ZoomRect(wxPoint p0, wxPoint p1)
@@ -1643,8 +1877,11 @@ void mpWindow::LockAspect(bool enable)
 
 void mpWindow::OnShowPopupMenu(wxMouseEvent &event)
 {
+	if (!m_enablePopupMenu)
+		return;
+
     // Only display menu if the user has not "dragged" the figure
-    if (m_enableMouseNavigation)
+    if (m_enableMouseNavigation && m_enableKeyboardNavigation)
     {
         SetCursor( *wxSTANDARD_CURSOR );
     }
@@ -1694,6 +1931,42 @@ void mpWindow::OnZoomIn(wxCommandEvent& WXUNUSED(event))
 void mpWindow::OnZoomOut(wxCommandEvent& WXUNUSED(event))
 {
     ZoomOut();
+}
+
+void mpWindow::OnZoomAllowX(wxCommandEvent &event)
+{
+	m_zoom = ZOOM_X;
+}
+
+void mpWindow::OnZoomAllowY(wxCommandEvent &event)
+{
+	m_zoom = ZOOM_Y;
+}
+
+void mpWindow::OnZoomAllowBoth(wxCommandEvent &event)
+{
+	m_zoom = ZOOM_BOTH;
+}
+
+void mpWindow::SetDefaultExtrema(double xMin, double xMax, double yMin, double yMax)
+{
+	m_defaultXmin = xMin;
+	m_defaultXmax = xMax;
+	m_defaultYmin = yMin;
+	m_defaultYmax = yMax;
+}
+
+void mpWindow::GetCurrentExtrema(double& xMin, double& xMax, double& yMin, double& yMax)
+{
+	xMin = m_posX;
+	xMax = m_posX + m_scrX / m_scaleX;
+	yMin = m_posY - m_scrY / m_scaleY;
+	yMax = m_posY;
+}
+
+void mpWindow::OnUseDefaultView(wxCommandEvent &event)
+{
+	Fit(m_defaultXmin, m_defaultXmax, m_defaultYmin, m_defaultYmax);
 }
 
 void mpWindow::OnSize( wxSizeEvent& WXUNUSED(event) )
@@ -2607,7 +2880,7 @@ void mpMovableObject::ShapeUpdated()
     // Just in case...
     if (m_shape_xs.size()!=m_shape_ys.size())
     {
-        ::wxLogError(wxT("[mpMovableObject::ShapeUpdated] Error, m_shape_xs and m_shape_ys have different lengths!"));
+        wxLogError(wxT("[mpMovableObject::ShapeUpdated] Error, m_shape_xs and m_shape_ys have different lengths!"));
     }
     else
     {
@@ -2746,9 +3019,9 @@ void mpCovarianceEllipse::RecalculateShape()
     m_shape_ys.clear();
 
     // Preliminar checks:
-    if (m_quantiles<0)  { ::wxLogError(wxT("[mpCovarianceEllipse] Error: quantiles must be non-negative")); return; }
-    if (m_cov_00<0)     { ::wxLogError(wxT("[mpCovarianceEllipse] Error: cov(0,0) must be non-negative")); return; }
-    if (m_cov_11<0)     { ::wxLogError(wxT("[mpCovarianceEllipse] Error: cov(1,1) must be non-negative")); return; }
+    if (m_quantiles<0)  { wxLogError(wxT("[mpCovarianceEllipse] Error: quantiles must be non-negative")); return; }
+    if (m_cov_00<0)     { wxLogError(wxT("[mpCovarianceEllipse] Error: cov(0,0) must be non-negative")); return; }
+    if (m_cov_11<0)     { wxLogError(wxT("[mpCovarianceEllipse] Error: cov(1,1) must be non-negative")); return; }
 
     m_shape_xs.resize( m_segments,0 );
     m_shape_ys.resize( m_segments,0 );
@@ -2760,7 +3033,7 @@ void mpCovarianceEllipse::RecalculateShape()
 
     double D = b*b - 4*c;
 
-    if (D<0)     { ::wxLogError(wxT("[mpCovarianceEllipse] Error: cov is not positive definite")); return; }
+    if (D<0)     { wxLogError(wxT("[mpCovarianceEllipse] Error: cov is not positive definite")); return; }
 
     double eigenVal0 =0.5*( -b + sqrt(D) );
     double eigenVal1 =0.5*( -b - sqrt(D) );
@@ -2844,7 +3117,7 @@ void mpPolygon::setPoints(
 {
     if ( points_xs.size()!=points_ys.size() )
     {
-        ::wxLogError(wxT("[mpPolygon] Error: points_xs and points_ys must have the same number of elements"));
+        wxLogError(wxT("[mpPolygon] Error: points_xs and points_ys must have the same number of elements"));
     }
     else
     {
@@ -2874,7 +3147,7 @@ void mpBitmapLayer::SetBitmap( const wxImage &inBmp, double x, double y, double 
 {
     if (!inBmp.Ok())
     {
-        ::wxLogError(wxT("[mpBitmapLayer] Assigned bitmap is not Ok()!"));
+        wxLogError(wxT("[mpBitmapLayer] Assigned bitmap is not Ok()!"));
     }
     else
     {

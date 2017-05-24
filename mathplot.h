@@ -108,12 +108,18 @@ class WXDLLIMPEXP_MATHPLOT mpWindow;
 class WXDLLIMPEXP_MATHPLOT mpText;
 class WXDLLIMPEXP_MATHPLOT mpPrintout;
 
+enum WXDLLIMPEXP_MATHPLOT mpMenuItem;
+
 /** Command IDs used by mpWindow */
 enum
 {
     mpID_FIT = 2000,    //!< Fit view to match bounding box of all layers
     mpID_ZOOM_IN,       //!< Zoom into view at clickposition / window center
     mpID_ZOOM_OUT,      //!< Zoom out
+	mpID_ZOOM_ALLOW_X,
+	mpID_ZOOM_ALLOW_Y,
+	mpID_ZOOM_ALLOW_BOTH,
+	mpID_USE_DEFAULT_VIEW,
     mpID_CENTER,        //!< Center view on click position
     mpID_LOCKASPECT,    //!< Lock x/y scaling aspect
     mpID_HELP_MOUSE     //!< Shows information about the mouse commands
@@ -493,6 +499,8 @@ protected:
 #define mpX_DATE 0x03
 /** Set label for X axis in datetime mode: the value is always represented as yyyy-mm-ddThh:mm:ss. */
 #define mpX_DATETIME 0x04
+/** Don't show labels on X axis */
+#define mpX_NONE 0x05
 /** Aligns Y axis to left border. For mpScaleY */
 #define mpALIGN_BORDER_LEFT mpALIGN_BORDER_BOTTOM
 /** Aligns Y axis to right border. For mpScaleY */
@@ -717,12 +725,17 @@ public:
 	/** Get X axis Label format (used for mpX_NORMAL draw mode).
 	@return The format string */
 	const wxString& SetLabelFormat() { return m_labelFormat; };
+
+	/** Define distance between ticks/gridlines to be used instead of automatically computed one.
+        @param step The step value. Step will be computed automatically if any negative value is set. */
+	void SetStep(double step) { m_step = step; }
 	
 protected:
     int m_flags; //!< Flag for axis alignment
     bool m_ticks; //!< Flag to toggle between ticks or grid
     unsigned int m_labelType; //!< Select labels mode: mpX_NORMAL for normal labels, mpX_TIME for time axis in hours, minutes, seconds
 	wxString m_labelFormat; //!< Format string used to print labels
+	double m_step;
 
     DECLARE_DYNAMIC_CLASS(mpScaleX)
 };
@@ -771,10 +784,15 @@ public:
 	@return The format string */
 	const wxString& SetLabelFormat() { return m_labelFormat; };
 
+	/** Define distance between ticks/gridlines to be used instead of automatically computed one.
+        @param step The step value. Step will be computed automatically if any negative value is set. */
+	void SetStep(double step) { m_step = step; }
+
 protected:
     int m_flags; //!< Flag for axis alignment
     bool m_ticks; //!< Flag to toggle between ticks or grid
 	wxString m_labelFormat; //!< Format string used to print labels
+	double m_step;
 
     DECLARE_DYNAMIC_CLASS(mpScaleY)
 };
@@ -825,7 +843,8 @@ public:
     mpWindow( wxWindow *parent, wxWindowID id,
                      const wxPoint &pos = wxDefaultPosition,
                      const wxSize &size = wxDefaultSize,
-                     long flags = 0);
+                     long flags = 0,
+					 const wxString& strName = wxT("mathplot"));
     ~mpWindow();
 
     /** Get reference to context menu of the plot canvas.
@@ -980,6 +999,8 @@ public:
      */
     void EnableMousePanZoom( bool enabled ) { m_enableMouseNavigation = enabled; }
 
+	void EnablePopupMenu(bool enabled) { m_enablePopupMenu = enabled; }
+
     /** Enable or disable X/Y scale aspect locking for the view.
         @note Explicit calls to mpWindow::SetScaleX and mpWindow::SetScaleY will set
               an unlocked aspect, but any other action changing the view scale will
@@ -1018,13 +1039,13 @@ public:
     void ZoomOut( const wxPoint& centerPoint = wxDefaultPosition );
 
     /** Zoom in current view along X and refresh display */
-    void ZoomInX();
+    void ZoomInX(const wxPoint& centerPoint = wxDefaultPosition);
     /** Zoom out current view along X and refresh display */
-    void ZoomOutX();
+    void ZoomOutX(const wxPoint& centerPoint = wxDefaultPosition);
     /** Zoom in current view along Y and refresh display */
-    void ZoomInY();
+    void ZoomInY(const wxPoint& centerPoint = wxDefaultPosition);
     /** Zoom out current view along Y and refresh display */
-    void ZoomOutY();
+    void ZoomOutY(const wxPoint& centerPoint = wxDefaultPosition);
 
     /** Zoom view fitting given coordinates to the window (p0 and p1 do not need to be in any specific order) */
     void ZoomRect(wxPoint p0, wxPoint p1);
@@ -1087,9 +1108,9 @@ public:
 	  @param fit Decide whether to fit the plot into the size*/
     bool SaveScreenshot(const wxString& filename, int type = wxBITMAP_TYPE_BMP, wxSize imageSize = wxDefaultSize, bool fit = false);
 
-    /** This value sets the zoom steps whenever the user clicks "Zoom in/out" or performs zoom with the mouse wheel.
-      *  It must be a number above unity. This number is used for zoom in, and its inverse for zoom out. Set to 1.5 by default. */
-    static double zoomIncrementalFactor;
+	 /** Define how much the view should be zoomed in/out each time zoom is used.
+      @param factor Ratio of width/height after zooming in to the height/width before zooming in. It must be a number above unity. Set to 1.5 by default. */
+	void SetZoomIncrementFactor(double factor) { m_zoomIncrementalFactor = factor; }
 
     /** Set window margins, creating a blank area where some kinds of layers cannot draw. This is useful for example to draw axes outside the area where the plots are drawn.
         @param top Top border
@@ -1115,6 +1136,11 @@ public:
     int GetMarginBottom() { return m_marginBottom; };
     /** Get the left margin. @param left Left Margin */
     int GetMarginLeft() { return m_marginLeft; };
+
+	/** Define constraints for default view. */
+	void SetDefaultExtrema(double xMin, double xMax, double yMin, double yMax);
+	/** Get current view constraints. */
+	void GetCurrentExtrema(double& xMin, double& xMax, double& yMin, double& yMax);
 
     /** Sets whether to show coordinate tooltip when mouse passes over the plot. \param value true for enable, false for disable */
     // void EnableCoordTooltip(bool value = true);
@@ -1156,6 +1182,18 @@ public:
 		@return reference to axis colour used in theme */
 	const wxColour& GetAxesColour() { return m_axColour; };
 
+	/** Decide whether mouse navigation requires keyboard or not (default=enabled). When disabled, the navigation resembles desktop google maps experience.
+     */
+	void EnableKeyboardNavigation(bool enable) { m_enableKeyboardNavigation = enable; }
+
+	/** Enable/disable automatic transition of focus to the window upon moving the cursor onto the window's area.
+     */
+	void SetAutoFocus(bool enable) { m_autoFocus = enable; }
+
+	/** Define custom set of items in the popup menu.
+     */
+	void SetPopupMenuItems(const std::vector<mpMenuItem>& items);
+
 protected:
     void OnPaint         (wxPaintEvent     &event); //!< Paint handler, will plot all attached layers
     void OnSize          (wxSizeEvent      &event); //!< Size handler, will update scroll bar sizes
@@ -1166,12 +1204,17 @@ protected:
     void OnFit           (wxCommandEvent   &event); //!< Context menu handler
     void OnZoomIn        (wxCommandEvent   &event); //!< Context menu handler
     void OnZoomOut       (wxCommandEvent   &event); //!< Context menu handler
+	void OnZoomAllowX	 (wxCommandEvent   &event); //!< Context menu handler
+	void OnZoomAllowY	 (wxCommandEvent   &event); //!< Context menu handler
+	void OnZoomAllowBoth (wxCommandEvent   &event); //!< Context menu handler
+	void OnUseDefaultView (wxCommandEvent   &event); //!< Context menu handler
     void OnLockAspect    (wxCommandEvent   &event); //!< Context menu handler
     void OnMouseHelp     (wxCommandEvent   &event); //!< Context menu handler
     void OnMouseWheel    (wxMouseEvent     &event); //!< Mouse handler for the wheel
     void OnMouseMove     (wxMouseEvent     &event); //!< Mouse handler for mouse motion (for pan)
     void OnMouseLeftDown (wxMouseEvent     &event); //!< Mouse left click (for rect zoom)
     void OnMouseLeftRelease (wxMouseEvent  &event); //!< Mouse left click (for rect zoom)
+	void OnMouseEnterWindow (wxMouseEvent  &event);
     void OnScrollThumbTrack (wxScrollWinEvent &event); //!< Scroll thumb on scroll bar moving
     void OnScrollPageUp     (wxScrollWinEvent &event); //!< Scroll page up 
     void OnScrollPageDown   (wxScrollWinEvent &event); //!< Scroll page down 
@@ -1214,23 +1257,39 @@ protected:
     int    m_clickedX;  //!< Last mouse click X position, for centering and zooming the view
     int    m_clickedY;  //!< Last mouse click Y position, for centering and zooming the view
 
+	enum ZoomDirection
+	{
+		ZOOM_X,
+		ZOOM_Y,
+		ZOOM_BOTH
+	};
+
+	ZoomDirection m_zoom;
+
     /** These are updated in Fit() only, and may be different from the real borders (layer coordinates) only if lock aspect ratio is true.
       */
     double m_desiredXmin,m_desiredXmax,m_desiredYmin,m_desiredYmax;
 
     int m_marginTop, m_marginRight, m_marginBottom, m_marginLeft;
 
+	double m_defaultXmin, m_defaultXmax, m_defaultYmin, m_defaultYmax;
+
     int         m_last_lx,m_last_ly;   //!< For double buffering
     wxMemoryDC  m_buff_dc;             //!< For double buffering
     wxBitmap    *m_buff_bmp;            //!< For double buffering
     bool        m_enableDoubleBuffer;  //!< For double buffering
     bool        m_enableMouseNavigation;  //!< For pan/zoom with the mouse.
+	bool        m_enablePopupMenu;
+	bool		m_enableKeyboardNavigation;
     bool        m_mouseMovedAfterRightClick;
+	bool		m_autoFocus;
     long        m_mouseRClick_X,m_mouseRClick_Y; //!< For the right button "drag" feature
     int         m_mouseLClick_X, m_mouseLClick_Y; //!< Starting coords for rectangular zoom selection
     bool        m_enableScrollBars;
     int         m_scrollX, m_scrollY;
     mpInfoLayer* m_movingInfoLayer;      //!< For moving info layers over the window area
+
+    double m_zoomIncrementalFactor;
 
     DECLARE_DYNAMIC_CLASS(mpWindow)
     DECLARE_EVENT_TABLE()
@@ -1688,7 +1747,23 @@ protected:
 
 };
 
+//-----------------------------------------------------------------------------
+// mpMenuItems
+//-----------------------------------------------------------------------------
 
+/** Items that may be displayed in the popup menu upon mouse right click.
+*/
+enum WXDLLIMPEXP_MATHPLOT mpMenuItem
+{
+	mpZOOM_SETTINGS,
+	mpZOOM_FUNCTIONS,
+	mpCENTER_VIEW,
+	mpDEFAULT_VIEW,
+	mpFIT_VIEW,
+	mpLOCK_ASPECT,
+	mpHELP_MOUSE,
+	mpSEPARATOR
+};
 
 /*@}*/
 
